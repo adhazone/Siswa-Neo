@@ -6,6 +6,64 @@
 <title>NEO Bimbel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCRIyRAqsd31do-QXrPDUKqT-lU7yhuk2c",
+    authDomain: "neo-bimbel-2cfb8.firebaseapp.com",
+    projectId: "neo-bimbel-2cfb8",
+    storageBucket: "neo-bimbel-2cfb8.firebasestorage.app",
+    messagingSenderId: "934523739180",
+    appId: "1:934523739180:web:5fdcb7d7ebe13baaa08589"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // ── Expose Firebase functions ke window agar bisa dipakai script non-module ──
+  window._db = db;
+  window._fbSetDoc = setDoc;
+  window._fbDeleteDoc = deleteDoc;
+  window._fbDoc = doc;
+  window._fbCollection = collection;
+  window._fbOnSnapshot = onSnapshot;
+  window._fbGetDoc = getDoc;
+
+  // ── Real-time listener untuk siswa ──
+  window._unsubSiswa = null;
+  window._startSiswaListener = function() {
+    if (window._unsubSiswa) window._unsubSiswa(); // unsubscribe lama kalau ada
+    const col = collection(db, 'siswa');
+    window._unsubSiswa = onSnapshot(col, (snapshot) => {
+      const data = [];
+      snapshot.forEach(d => data.push(d.data()));
+      data.sort((a, b) => a.id - b.id);
+      window.siswa = data;
+      // Hitung nextId dari data yang ada
+      if (data.length > 0) {
+        const maxId = Math.max(...data.map(s => s.id));
+        if (window.nextId <= maxId) window.nextId = maxId + 1;
+      }
+      // Render kalau app sudah visible
+      if (document.getElementById('app').classList.contains('visible')) {
+        window.renderAll();
+        // Juga render tagihan kalau section itu aktif
+        if (document.getElementById('sec-tagihan').classList.contains('active')) {
+          window.renderTagihan();
+        }
+        if (document.getElementById('sec-siswa').classList.contains('active')) {
+          window.renderSiswa();
+        }
+      }
+    }, (err) => {
+      console.error('Firestore listener error:', err);
+      window.toast('Gagal sync data: ' + err.message, 'error');
+    });
+  };
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
@@ -375,7 +433,7 @@ tbody tr:hover td{background:var(--b50);}
             </div>
           </div>
           <div class="table-wrap mobile-hide">
-            <table><thead><tr><th style="width:26%">Nama Siswa</th><th style="width:14%">Tgl Masuk</th><th style="width:24%">Orang Tua / WA</th><th style="width:14%">Biaya/bln</th><th style="width:12%">Status</th><th style="width:10%">Aksi</th></tr></thead>
+            <table><thead><tr><th style="width:24%">Nama Siswa</th><th style="width:12%">Tgl Masuk</th><th style="width:20%">Orang Tua / WA</th><th style="width:18%">Paket</th><th style="width:12%">Jatuh Tempo</th><th style="width:10%">Status</th><th style="width:4%">Aksi</th></tr></thead>
             <tbody id="tbl-siswa"></tbody></table>
           </div>
           <div class="mobile-cards" id="cards-siswa" style="padding:10px;"></div>
@@ -401,7 +459,7 @@ tbody tr:hover td{background:var(--b50);}
             </div>
           </div>
           <div class="table-wrap mobile-hide">
-            <table><thead><tr><th style="width:24%">Nama</th><th style="width:18%">Orang Tua</th><th style="width:18%">No WA</th><th style="width:16%">Tagihan</th><th style="width:12%">Status</th><th style="width:12%">Aksi</th></tr></thead>
+            <table><thead><tr><th style="width:20%">Nama</th><th style="width:16%">Orang Tua</th><th style="width:15%">No WA</th><th style="width:16%">Paket</th><th style="width:13%">Tagihan</th><th style="width:10%">Jatuh Tempo</th><th style="width:10%">Status</th><th style="width:0%">Aksi</th></tr></thead>
             <tbody id="tbl-tagihan"></tbody></table>
           </div>
           <div class="mobile-cards" id="cards-tagihan" style="padding:10px;"></div>
@@ -452,15 +510,32 @@ tbody tr:hover td{background:var(--b50);}
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Nama Siswa *</label><input class="form-input" id="f-nama" placeholder="Nama lengkap"></div>
-      <div class="form-group"><label class="form-label">Tanggal Masuk *</label><input class="form-input" type="date" id="f-tanggal"></div>
+      <div class="form-group"><label class="form-label">Tanggal Masuk *</label><input class="form-input" type="date" id="f-tanggal" onchange="autoJatuhTempo()"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Nama Orang Tua</label><input class="form-input" id="f-ortu" placeholder="Bapak / Ibu ..."></div>
       <div class="form-group"><label class="form-label">No. WA Orang Tua</label><input class="form-input" id="f-wa" placeholder="08xxxxxxxxxx" inputmode="numeric"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Biaya Les/Bulan (Rp)</label><input class="form-input" type="number" id="f-biaya" placeholder="250000" step="50000" inputmode="numeric"></div>
-      <div class="form-group"><label class="form-label">Mata Pelajaran</label><input class="form-input" id="f-mapel" placeholder="Matematika, IPA..."></div>
+      <div class="form-group">
+        <label class="form-label">Program *</label>
+        <select class="form-input" id="f-program" onchange="updatePaket()">
+          <option value="">-- Pilih program --</option>
+          <option value="reguler">Reguler</option>
+          <option value="calistung">Calistung</option>
+          <option value="inggris">Bahasa Inggris</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Paket *</label>
+        <select class="form-input" id="f-paket" onchange="autoJatuhTempo()">
+          <option value="">-- Pilih paket --</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Biaya (Rp)</label><input class="form-input" type="number" id="f-biaya" placeholder="250000" step="50000" inputmode="numeric"></div>
+      <div class="form-group"><label class="form-label">Tanggal Jatuh Tempo</label><input class="form-input" type="date" id="f-jatuh"></div>
     </div>
     <div class="form-group">
       <label class="form-label">Status Tagihan</label>
@@ -494,7 +569,7 @@ function updateDots(){for(let i=0;i<4;i++) document.getElementById('d'+i).classN
 function clearErr(){document.getElementById('pin-err').textContent='';}
 function checkPin(){
   if(pinInput===getPin()){
-    document.getElementById('pin-screen').classList.add('hidden');
+  document.getElementById('pin-screen').classList.add('hidden');
     document.getElementById('app').classList.add('visible');
     init();
   } else {
@@ -524,20 +599,76 @@ function logout(){
 
 // ── DATA ──
 let editId=null;
-let siswa=JSON.parse(localStorage.getItem('neo_siswa')||'null')||[
-  {id:1,nama:'Andi Pratama',masuk:'2025-01-10',ortu:'Pak Hendra',wa:'081234567890',biaya:250000,mapel:'Matematika',status:'lunas'},
-  {id:2,nama:'Siti Rahma',masuk:'2025-03-05',ortu:'Bu Marlina',wa:'082345678901',biaya:300000,mapel:'IPA, Inggris',status:'belum'},
-  {id:3,nama:'Deni Kurniawan',masuk:'2024-11-20',ortu:'Pak Susanto',wa:'083456789012',biaya:200000,mapel:'IPS',status:'terlambat'},
-  {id:4,nama:'Putri Wulandari',masuk:'2025-06-15',ortu:'Bu Sri',wa:'084567890123',biaya:250000,mapel:'Matematika, IPA',status:'lunas'},
-  {id:5,nama:'Rizky Fadhillah',masuk:'2025-08-01',ortu:'Pak Ahmad',wa:'085678901234',biaya:350000,mapel:'Fisika, Kimia',status:'belum'},
-];
-let nextId=parseInt(localStorage.getItem('neo_nextid')||String(Math.max(...siswa.map(s=>s.id),5)+1));
+// Data siswa dikelola oleh Firebase listener, diinisiasi kosong dulu
+let siswa = [];
+let nextId = 1;
 let config=JSON.parse(localStorage.getItem('neo_config')||'null')||{
   nama:'NEO Bimbel',
-  pesan:'Halo {ortu}, pengingat tagihan les {nama} bulan {bulan} {tahun} sebesar {biaya}. Mohon segera dilunasi. Terima kasih! 🙏'
+  pesan:'Halo {ortu}, pengingat tagihan les {nama} paket {paket} sebesar {biaya}, jatuh tempo {jatuh}. Mohon segera dilunasi. Terima kasih! 🙏'
 };
 
-function simpan(){localStorage.setItem('neo_siswa',JSON.stringify(siswa));localStorage.setItem('neo_nextid',String(nextId));}
+// ── PAKET CONFIG ──
+const PAKET_OPTIONS={
+  reguler:['1 Bulan','3 Bulan','6 Bulan','1 Tahun'],
+  calistung:['1 Bulan','3 Bulan','6 Bulan','1 Tahun'],
+  inggris:['Bulanan','Paket 3 Bulan']
+};
+const PAKET_DURASI={
+  '1 Bulan':1,'3 Bulan':3,'6 Bulan':6,'1 Tahun':12,
+  'Bulanan':1,'Paket 3 Bulan':3
+};
+const PROGRAM_LABEL={reguler:'Reguler',calistung:'Calistung',inggris:'Bhs. Inggris'};
+
+function updatePaket(){
+  const prog=document.getElementById('f-program').value;
+  const sel=document.getElementById('f-paket');
+  sel.innerHTML='<option value="">-- Pilih paket --</option>';
+  if(prog && PAKET_OPTIONS[prog]){
+    PAKET_OPTIONS[prog].forEach(p=>{
+      const o=document.createElement('option');o.value=p;o.textContent=p;sel.appendChild(o);
+    });
+  }
+  autoJatuhTempo();
+}
+
+function autoJatuhTempo(){
+  const masuk=document.getElementById('f-tanggal').value;
+  const paket=document.getElementById('f-paket').value;
+  if(!masuk||!paket) return;
+  const dur=PAKET_DURASI[paket]||1;
+  const d=new Date(masuk);
+  d.setMonth(d.getMonth()+dur);
+  document.getElementById('f-jatuh').value=d.toISOString().split('T')[0];
+}
+
+function paketLabel(s){
+  const prog=PROGRAM_LABEL[s.program]||s.program||'';
+  const pk=s.paket||'';
+  return prog&&pk?`${prog} — ${pk}`:prog||pk||'-';
+}
+
+// ── SIMPAN KE FIREBASE ──
+async function simpan(siswaData){
+  // siswaData = satu objek siswa yang disimpan/diupdate
+  const db = window._db;
+  const docRef = window._fbDoc(db, 'siswa', String(siswaData.id));
+  try {
+    await window._fbSetDoc(docRef, siswaData);
+  } catch(e) {
+    toast('Gagal simpan ke Firebase: ' + e.message, 'error');
+    console.error(e);
+  }
+}
+async function hapusFirebase(id){
+  const db = window._db;
+  const docRef = window._fbDoc(db, 'siswa', String(id));
+  try {
+    await window._fbDeleteDoc(docRef);
+  } catch(e) {
+    toast('Gagal hapus: ' + e.message, 'error');
+    console.error(e);
+  }
+}
 
 // ── INIT ──
 function init(){
@@ -545,6 +676,13 @@ function init(){
   document.getElementById('sidebar-bulan').textContent=BULAN[bulanIni]+' '+tahunIni;
   document.getElementById('cfg-pesan').value=config.pesan;
   document.getElementById('cfg-nama').value=config.nama;
+  // Mulai Firebase real-time listener
+  if (window._startSiswaListener) {
+    window._startSiswaListener();
+  } else {
+    // Retry singkat kalau module belum selesai load
+    setTimeout(()=>{ if(window._startSiswaListener) window._startSiswaListener(); }, 500);
+  }
   renderAll();
 }
 
@@ -575,7 +713,14 @@ function badge(st){
   return `<span class="badge ${c}"><span class="badge-dot"></span>${l}</span>`;
 }
 function waUrl(s){
-  const p=config.pesan.replace('{ortu}',s.ortu||'Orang Tua').replace('{nama}',s.nama).replace('{bulan}',BULAN[bulanIni]).replace('{tahun}',tahunIni).replace('{biaya}',fmtRp(s.biaya));
+  const p=config.pesan
+    .replace('{ortu}',s.ortu||'Orang Tua')
+    .replace('{nama}',s.nama)
+    .replace('{bulan}',BULAN[bulanIni])
+    .replace('{tahun}',tahunIni)
+    .replace('{biaya}',fmtRp(s.biaya))
+    .replace('{paket}',paketLabel(s))
+    .replace('{jatuh}',fmtTgl(s.jatuh));
   const no=(s.wa||'').replace(/^0/,'62').replace(/\D/g,'');
   return `https://wa.me/${no}?text=${encodeURIComponent(p)}`;
 }
@@ -599,16 +744,17 @@ function renderDash(){
   const perlu=siswa.filter(s=>s.status!=='lunas').slice(0,5);
   const empty='<tr class="empty-row"><td colspan="5">Semua siswa sudah lunas 🎉</td></tr>';
   document.getElementById('tbl-dash').innerHTML=!perlu.length?empty:perlu.map(s=>`<tr>
-    <td><div class="td-with-avatar"><div class="avatar">${inits(s.nama)}</div><div><div class="td-name">${s.nama}</div><div class="td-sub">${s.mapel||''}</div></div></div></td>
+    <td><div class="td-with-avatar"><div class="avatar">${inits(s.nama)}</div><div><div class="td-name">${s.nama}</div><div class="td-sub">${paketLabel(s)}</div></div></div></td>
     <td><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.ortu||'-'}</div></td>
     <td>${fmtRp(s.biaya)}</td><td>${badge(s.status)}</td>
     <td><div class="actions"><a class="act act-wa" href="${waUrl(s)}" target="_blank">WA</a><button class="act act-lunas" onclick="toggleStatus(${s.id})">Lunas</button></div></td>
   </tr>`).join('');
   const cd=document.getElementById('cards-dash');
   cd.innerHTML=!perlu.length?'<div style="text-align:center;color:var(--g400);padding:16px;font-size:13px;">Semua siswa sudah lunas 🎉</div>':perlu.map(s=>`<div class="m-card">
-    <div class="m-card-top"><div><div class="m-card-name">${s.nama}</div><div class="m-card-sub">${s.mapel||''}</div></div>${badge(s.status)}</div>
+    <div class="m-card-top"><div><div class="m-card-name">${s.nama}</div><div class="m-card-sub">${paketLabel(s)}</div></div>${badge(s.status)}</div>
     <div class="m-card-row"><span style="color:var(--g500)">Orang Tua</span><span>${s.ortu||'-'}</span></div>
     <div class="m-card-row"><span style="color:var(--g500)">Tagihan</span><span style="font-weight:700;">${fmtRp(s.biaya)}</span></div>
+    <div class="m-card-row"><span style="color:var(--g500)">Jatuh Tempo</span><span style="color:${isLewat(s.jatuh)?'var(--red)':'var(--g900)'};">${fmtTgl(s.jatuh)}</span></div>
     <div class="m-card-actions"><a class="act act-wa" href="${waUrl(s)}" target="_blank">WA Tagih</a><button class="act act-lunas" onclick="toggleStatus(${s.id})">Tandai Lunas</button></div>
   </div>`).join('');
 }
@@ -619,12 +765,14 @@ function renderSiswa(){
   const fs=document.getElementById('filterStatus')?.value||'';
   const data=siswa.filter(s=>(s.nama.toLowerCase().includes(q)||(s.ortu||'').toLowerCase().includes(q))&&(fs?s.status===fs:true));
   document.getElementById('jumlah-label').textContent=`${data.length} siswa terdaftar`;
-  const empty='<tr class="empty-row"><td colspan="6">Tidak ada siswa ditemukan</td></tr>';
+  const empty='<tr class="empty-row"><td colspan="7">Tidak ada siswa ditemukan</td></tr>';
   document.getElementById('tbl-siswa').innerHTML=!data.length?empty:data.map(s=>`<tr>
-    <td><div class="td-with-avatar"><div class="avatar">${inits(s.nama)}</div><div><div class="td-name">${s.nama}</div><div class="td-sub">${s.mapel||''}</div></div></div></td>
+    <td><div class="td-with-avatar"><div class="avatar">${inits(s.nama)}</div><div><div class="td-name">${s.nama}</div><div class="td-sub">${fmtTgl(s.masuk)}</div></div></div></td>
     <td>${fmtTgl(s.masuk)}</td>
     <td><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.ortu||'-'}</div><div class="td-sub">${s.wa||'-'}</div></td>
-    <td>${fmtRp(s.biaya)}</td><td>${badge(s.status)}</td>
+    <td><div class="td-name" style="font-size:12px;">${paketLabel(s)}</div><div class="td-sub">${fmtRp(s.biaya)}</div></td>
+    <td><div style="color:${isLewat(s.jatuh)&&s.status!=='lunas'?'var(--red)':'var(--g700)'};font-size:12px;font-weight:${isLewat(s.jatuh)&&s.status!=='lunas'?'700':'400'};">${fmtTgl(s.jatuh)}</div></td>
+    <td>${badge(s.status)}</td>
     <td><div class="actions">
       <button class="act act-lunas" onclick="toggleStatus(${s.id})">${s.status==='lunas'?'Batal':'Lunas'}</button>
       <button class="act act-edit" onclick="editSiswa(${s.id})">Edit</button>
@@ -632,10 +780,12 @@ function renderSiswa(){
     </div></td>
   </tr>`).join('');
   document.getElementById('cards-siswa').innerHTML=!data.length?'<div style="text-align:center;color:var(--g400);padding:16px;font-size:13px;">Tidak ada siswa</div>':data.map(s=>`<div class="m-card">
-    <div class="m-card-top"><div><div class="m-card-name">${s.nama}</div><div class="m-card-sub">${fmtTgl(s.masuk)} · ${s.mapel||''}</div></div>${badge(s.status)}</div>
+    <div class="m-card-top"><div><div class="m-card-name">${s.nama}</div><div class="m-card-sub">${paketLabel(s)}</div></div>${badge(s.status)}</div>
+    <div class="m-card-row"><span style="color:var(--g500)">Tgl Masuk</span><span>${fmtTgl(s.masuk)}</span></div>
     <div class="m-card-row"><span style="color:var(--g500)">Orang Tua</span><span>${s.ortu||'-'}</span></div>
     <div class="m-card-row"><span style="color:var(--g500)">No WA</span><span>${s.wa||'-'}</span></div>
-    <div class="m-card-row"><span style="color:var(--g500)">Biaya/bln</span><span style="font-weight:700;">${fmtRp(s.biaya)}</span></div>
+    <div class="m-card-row"><span style="color:var(--g500)">Biaya</span><span style="font-weight:700;">${fmtRp(s.biaya)}</span></div>
+    <div class="m-card-row"><span style="color:var(--g500)">Jatuh Tempo</span><span style="color:${isLewat(s.jatuh)&&s.status!=='lunas'?'var(--red)':'var(--g900)'};font-weight:${isLewat(s.jatuh)&&s.status!=='lunas'?'700':'400'};">${fmtTgl(s.jatuh)}</span></div>
     <div class="m-card-actions">
       <button class="act act-lunas" onclick="toggleStatus(${s.id})">${s.status==='lunas'?'Batal':'Lunas'}</button>
       <button class="act act-edit" onclick="editSiswa(${s.id})">Edit</button>
@@ -655,19 +805,25 @@ function renderTagihan(){
   document.getElementById('t-total-rp').textContent=fmtRp(tL+tB);
   document.getElementById('tagihan-sub').textContent=`Periode ${BULAN[bulanIni]} ${tahunIni}`;
   document.getElementById('tagihan-title').textContent=`Tagihan ${BULAN[bulanIni]} ${tahunIni}`;
-  const empty='<tr class="empty-row"><td colspan="6">Tidak ada data</td></tr>';
+  const empty='<tr class="empty-row"><td colspan="8">Tidak ada data</td></tr>';
   document.getElementById('tbl-tagihan').innerHTML=!data.length?empty:data.map(s=>`<tr>
     <td><div class="td-with-avatar"><div class="avatar">${inits(s.nama)}</div><div class="td-name">${s.nama}</div></div></td>
     <td>${s.ortu||'-'}</td><td>${s.wa||'-'}</td>
-    <td style="font-weight:700;">${fmtRp(s.biaya)}</td><td>${badge(s.status)}</td>
+    <td><div style="font-size:12px;font-weight:600;">${paketLabel(s)}</div></td>
+    <td style="font-weight:700;">${fmtRp(s.biaya)}</td>
+    <td style="color:${isLewat(s.jatuh)&&s.status!=='lunas'?'var(--red)':'var(--g700)'};font-weight:${isLewat(s.jatuh)&&s.status!=='lunas'?'700':'400'};font-size:12px;">${fmtTgl(s.jatuh)}</td>
+    <td>${badge(s.status)}</td>
     <td><div class="actions">
       <a class="act act-wa" href="${waUrl(s)}" target="_blank">WA</a>
       <button class="act act-lunas" onclick="toggleStatus(${s.id})">${s.status==='lunas'?'Batal':'Lunas'}</button>
     </div></td>
   </tr>`).join('');
   document.getElementById('cards-tagihan').innerHTML=!data.length?'<div style="text-align:center;color:var(--g400);padding:16px;font-size:13px;">Tidak ada data</div>':data.map(s=>`<div class="m-card">
-    <div class="m-card-top"><div><div class="m-card-name">${s.nama}</div><div class="m-card-sub">${s.ortu||'-'} · ${s.wa||'-'}</div></div>${badge(s.status)}</div>
+    <div class="m-card-top"><div><div class="m-card-name">${s.nama}</div><div class="m-card-sub">${paketLabel(s)}</div></div>${badge(s.status)}</div>
+    <div class="m-card-row"><span style="color:var(--g500)">Orang Tua</span><span>${s.ortu||'-'}</span></div>
+    <div class="m-card-row"><span style="color:var(--g500)">No WA</span><span>${s.wa||'-'}</span></div>
     <div class="m-card-row"><span style="color:var(--g500)">Tagihan</span><span style="font-weight:700;">${fmtRp(s.biaya)}</span></div>
+    <div class="m-card-row"><span style="color:var(--g500)">Jatuh Tempo</span><span style="color:${isLewat(s.jatuh)&&s.status!=='lunas'?'var(--red)':'var(--g900)'};font-weight:${isLewat(s.jatuh)&&s.status!=='lunas'?'700':'400'};">${fmtTgl(s.jatuh)}</span></div>
     <div class="m-card-actions">
       <a class="act act-wa" href="${waUrl(s)}" target="_blank">WA Tagih</a>
       <button class="act act-lunas" onclick="toggleStatus(${s.id})">${s.status==='lunas'?'Batal Lunas':'Tandai Lunas'}</button>
@@ -681,13 +837,13 @@ function renderAll(){renderDash();renderSiswa();}
 function toggleStatus(id){
   const s=siswa.find(x=>x.id===id);if(!s) return;
   s.status=s.status==='lunas'?'belum':'lunas';
-  simpan();renderAll();renderTagihan();
+  simpan(s);
   toast(s.status==='lunas'?`${s.nama} ditandai Lunas ✓`:`${s.nama} dibatalkan lunas`,'success');
 }
 function hapus(id){
   const s=siswa.find(x=>x.id===id);
   if(!s||!confirm(`Hapus data ${s.nama}?`)) return;
-  siswa=siswa.filter(x=>x.id!==id);simpan();renderAll();
+  hapusFirebase(id);
   toast('Data siswa dihapus','info');
 }
 function kirimSemuaWa(){
@@ -696,14 +852,30 @@ function kirimSemuaWa(){
   window.open(waUrl(t[0]),'_blank');
   toast(`WA dibuka untuk ${t[0].nama}`,'info');
 }
-function resetData(){
+async function resetData(){
   if(!confirm('Hapus semua data siswa? Tidak bisa dibatalkan.')) return;
-  siswa=[];nextId=1;simpan();renderAll();toast('Semua data dihapus','info');
+  const db = window._db;
+  const col = window._fbCollection(db, 'siswa');
+  // Hapus satu per satu dari array lokal
+  const ids = siswa.map(s => s.id);
+  for(const id of ids){
+    try {
+      await window._fbDeleteDoc(window._fbDoc(db,'siswa',String(id)));
+    } catch(e){ console.error(e); }
+  }
+  nextId=1;
+  toast('Semua data dihapus','info');
 }
+
+// ── HELPERS ──
+function isLewat(tgl){if(!tgl) return false;return new Date(tgl)<new Date();}
 
 // ── MODAL ──
 function bukaModal(id){
   editId=id||null;
+  // reset paket options first
+  document.getElementById('f-program').value='';
+  document.getElementById('f-paket').innerHTML='<option value="">-- Pilih paket --</option>';
   if(id){
     const s=siswa.find(x=>x.id===id);
     document.getElementById('f-nama').value=s.nama;
@@ -711,13 +883,20 @@ function bukaModal(id){
     document.getElementById('f-ortu').value=s.ortu||'';
     document.getElementById('f-wa').value=s.wa||'';
     document.getElementById('f-biaya').value=s.biaya;
-    document.getElementById('f-mapel').value=s.mapel||'';
+    document.getElementById('f-jatuh').value=s.jatuh||'';
     document.getElementById('f-status').value=s.status;
+    // set program + rebuild paket
+    if(s.program){
+      document.getElementById('f-program').value=s.program;
+      updatePaket();
+      document.getElementById('f-paket').value=s.paket||'';
+    }
     document.getElementById('modal-title').textContent='Edit Data Siswa';
   } else {
-    ['f-nama','f-ortu','f-wa','f-mapel'].forEach(i=>document.getElementById(i).value='');
+    ['f-nama','f-ortu','f-wa'].forEach(i=>document.getElementById(i).value='');
     document.getElementById('f-tanggal').value='';
     document.getElementById('f-biaya').value='';
+    document.getElementById('f-jatuh').value='';
     document.getElementById('f-status').value='belum';
     document.getElementById('modal-title').textContent='Tambah Siswa Baru';
   }
@@ -729,11 +908,30 @@ function tutupModal(){document.getElementById('modal').classList.remove('open');
 function simpanSiswa(){
   const nama=document.getElementById('f-nama').value.trim();
   const masuk=document.getElementById('f-tanggal').value;
+  const program=document.getElementById('f-program').value;
+  const paket=document.getElementById('f-paket').value;
   if(!nama||!masuk){toast('Nama dan tanggal masuk wajib diisi','error');return;}
-  const data={nama,masuk,ortu:document.getElementById('f-ortu').value.trim(),wa:document.getElementById('f-wa').value.trim(),biaya:parseInt(document.getElementById('f-biaya').value)||0,mapel:document.getElementById('f-mapel').value.trim(),status:document.getElementById('f-status').value};
-  if(editId){Object.assign(siswa.find(x=>x.id===editId),data);toast('Data diperbarui ✓','success');}
-  else{siswa.push({id:nextId++,...data});toast(`${nama} ditambahkan ✓`,'success');}
-  simpan();tutupModal();renderAll();
+  if(!program||!paket){toast('Pilih program dan paket terlebih dahulu','error');return;}
+  const data={
+    nama,masuk,
+    ortu:document.getElementById('f-ortu').value.trim(),
+    wa:document.getElementById('f-wa').value.trim(),
+    biaya:parseInt(document.getElementById('f-biaya').value)||0,
+    program,paket,
+    jatuh:document.getElementById('f-jatuh').value,
+    status:document.getElementById('f-status').value
+  };
+  if(editId){
+    const existing=siswa.find(x=>x.id===editId);
+    if(existing) Object.assign(existing,data);
+    simpan({id:editId,...data});
+    toast('Data diperbarui ✓','success');
+  } else {
+    const newId=nextId++;
+    simpan({id:newId,...data});
+    toast(`${nama} ditambahkan ✓`,'success');
+  }
+  tutupModal();
 }
 function simpanConfig(){
   config.nama=document.getElementById('cfg-nama').value;
