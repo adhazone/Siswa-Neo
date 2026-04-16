@@ -600,8 +600,10 @@ function logout(){
 // ── DATA ──
 let editId=null;
 // Data siswa dikelola oleh Firebase listener, diinisiasi kosong dulu
-let siswa = [];
-let nextId = 1;
+window.siswa = [];
+let siswa = window.siswa; // alias lokal
+window.nextId = 1;
+let nextId = window.nextId;
 let config=JSON.parse(localStorage.getItem('neo_config')||'null')||{
   nama:'NEO Bimbel',
   pesan:'Halo {ortu}, pengingat tagihan les {nama} paket {paket} sebesar {biaya}, jatuh tempo {jatuh}. Mohon segera dilunasi. Terima kasih! 🙏'
@@ -727,10 +729,11 @@ function waUrl(s){
 
 // ── STATS ──
 function renderStats(){
-  const l=siswa.filter(s=>s.status==='lunas').length;
-  const b=siswa.filter(s=>s.status==='belum').length;
-  const t=siswa.filter(s=>s.status==='terlambat').length;
-  document.getElementById('s-total').textContent=siswa.length;
+  const arr = window.siswa;
+  const l=arr.filter(s=>s.status==='lunas').length;
+  const b=arr.filter(s=>s.status==='belum').length;
+  const t=arr.filter(s=>s.status==='terlambat').length;
+  document.getElementById('s-total').textContent=arr.length;
   document.getElementById('s-lunas').textContent=l;
   document.getElementById('s-belum').textContent=b;
   document.getElementById('s-terlambat').textContent=t;
@@ -741,7 +744,7 @@ function renderStats(){
 // ── DASHBOARD ──
 function renderDash(){
   renderStats();
-  const perlu=siswa.filter(s=>s.status!=='lunas').slice(0,5);
+  const perlu=window.siswa.filter(s=>s.status!=='lunas').slice(0,5);
   const empty='<tr class="empty-row"><td colspan="5">Semua siswa sudah lunas 🎉</td></tr>';
   document.getElementById('tbl-dash').innerHTML=!perlu.length?empty:perlu.map(s=>`<tr>
     <td><div class="td-with-avatar"><div class="avatar">${inits(s.nama)}</div><div><div class="td-name">${s.nama}</div><div class="td-sub">${paketLabel(s)}</div></div></div></td>
@@ -763,7 +766,7 @@ function renderDash(){
 function renderSiswa(){
   const q=(document.getElementById('cari')?.value||'').toLowerCase();
   const fs=document.getElementById('filterStatus')?.value||'';
-  const data=siswa.filter(s=>(s.nama.toLowerCase().includes(q)||(s.ortu||'').toLowerCase().includes(q))&&(fs?s.status===fs:true));
+  const data=window.siswa.filter(s=>(s.nama.toLowerCase().includes(q)||(s.ortu||'').toLowerCase().includes(q))&&(fs?s.status===fs:true));
   document.getElementById('jumlah-label').textContent=`${data.length} siswa terdaftar`;
   const empty='<tr class="empty-row"><td colspan="7">Tidak ada siswa ditemukan</td></tr>';
   document.getElementById('tbl-siswa').innerHTML=!data.length?empty:data.map(s=>`<tr>
@@ -796,10 +799,11 @@ function renderSiswa(){
 
 // ── TAGIHAN ──
 function renderTagihan(){
+  const arr = window.siswa;
   const ft=document.getElementById('filterTagihan')?.value||'';
-  const data=ft?siswa.filter(s=>s.status===ft):[...siswa];
-  const tL=siswa.filter(s=>s.status==='lunas').reduce((a,s)=>a+Number(s.biaya),0);
-  const tB=siswa.filter(s=>s.status!=='lunas').reduce((a,s)=>a+Number(s.biaya),0);
+  const data=ft?arr.filter(s=>s.status===ft):[...arr];
+  const tL=arr.filter(s=>s.status==='lunas').reduce((a,s)=>a+Number(s.biaya),0);
+  const tB=arr.filter(s=>s.status!=='lunas').reduce((a,s)=>a+Number(s.biaya),0);
   document.getElementById('t-lunas-rp').textContent=fmtRp(tL);
   document.getElementById('t-belum-rp').textContent=fmtRp(tB);
   document.getElementById('t-total-rp').textContent=fmtRp(tL+tB);
@@ -832,18 +836,23 @@ function renderTagihan(){
 }
 
 function renderAll(){renderDash();renderSiswa();}
+// Expose ke window agar Firebase module bisa memanggil
+window.renderAll = renderAll;
+window.renderTagihan = renderTagihan;
+window.renderSiswa = renderSiswa;
+window.toast = toast;
 
 // ── ACTIONS ──
-function toggleStatus(id){
-  const s=siswa.find(x=>x.id===id);if(!s) return;
+async function toggleStatus(id){
+  const s=window.siswa.find(x=>x.id===id);if(!s) return;
   s.status=s.status==='lunas'?'belum':'lunas';
-  simpan(s);
+  await simpan(s);
   toast(s.status==='lunas'?`${s.nama} ditandai Lunas ✓`:`${s.nama} dibatalkan lunas`,'success');
 }
-function hapus(id){
-  const s=siswa.find(x=>x.id===id);
+async function hapus(id){
+  const s=window.siswa.find(x=>x.id===id);
   if(!s||!confirm(`Hapus data ${s.nama}?`)) return;
-  hapusFirebase(id);
+  await hapusFirebase(id);
   toast('Data siswa dihapus','info');
 }
 function kirimSemuaWa(){
@@ -905,7 +914,7 @@ function bukaModal(id){
 }
 function editSiswa(id){bukaModal(id);}
 function tutupModal(){document.getElementById('modal').classList.remove('open');}
-function simpanSiswa(){
+async function simpanSiswa(){
   const nama=document.getElementById('f-nama').value.trim();
   const masuk=document.getElementById('f-tanggal').value;
   const program=document.getElementById('f-program').value;
@@ -922,13 +931,14 @@ function simpanSiswa(){
     status:document.getElementById('f-status').value
   };
   if(editId){
-    const existing=siswa.find(x=>x.id===editId);
+    const existing=window.siswa.find(x=>x.id===editId);
     if(existing) Object.assign(existing,data);
-    simpan({id:editId,...data});
+    await simpan({id:editId,...data});
     toast('Data diperbarui ✓','success');
   } else {
-    const newId=nextId++;
-    simpan({id:newId,...data});
+    const newId = window.nextId++;
+    nextId = window.nextId;
+    await simpan({id:newId,...data});
     toast(`${nama} ditambahkan ✓`,'success');
   }
   tutupModal();
